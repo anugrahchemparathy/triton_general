@@ -61,16 +61,19 @@ def softmax_kernel(output_ptr, input_ptr, input_row_stride, output_row_stride, b
         input_row_start_ptr = input_ptr + row_idx * input_row_stride
         output_row_start_ptr = output_ptr + row_idx * output_row_stride
 
-        input_row_ptrs = input_row_start_ptr + tl.arange(0, BLOCK_SIZE)
-        output_row_ptrs = output_row_start_ptr + tl.arange(0, BLOCK_SIZE)
+        col_offsets = tl.arange(0, BLOCK_SIZE)
+        mask = col_offsets < n_elements
+        input_row_ptrs = input_row_start_ptr + col_offsets
+        output_row_ptrs = output_row_start_ptr + col_offsets
 
-        input_row = tl.load(input_row_ptrs)
+
+        input_row = tl.load(input_row_ptrs, mask=mask, other=-float('inf'))
         input_row_minus_max = input_row - tl.max(input_row, axis=0)
         numerator = tl.exp(input_row_minus_max)
         denominator = tl.sum(numerator, axis = 0)
         softmax_output = numerator / denominator
 
-        tl.store(output_row_ptrs, softmax_output)
+        tl.store(output_row_ptrs, softmax_output, mask=mask)
 
 
 
@@ -86,7 +89,7 @@ def softmax(x):
     """
     batch_size, n_elements = x.shape
     y = torch.empty_like(x)
-    BLOCK_SIZE = n_elements
+    BLOCK_SIZE = triton.next_power_of_2(n_elements)
     num_stages = 2
 
     kernel = softmax_kernel
